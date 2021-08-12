@@ -59,7 +59,8 @@ export interface AddonDataScheme {
     Type?: 'data' | 'meta_data' | 'cpi_meta_data' | 'indexed_data';
     Fields?: {
         [key: string]: {
-            Type: 'String' | 'Bool' | 'Integer' | 'MultipleStringValues';
+            Type: 'String' | 'Bool' | 'Integer' | 'MultipleStringValues' | 'DateTime';
+            Indexed?: boolean;
         };
     };
     Validator?: string;
