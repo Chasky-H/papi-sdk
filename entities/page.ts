@@ -45,8 +45,11 @@ export type PageSizeType = 'SM' | 'MD' | 'LG';
 
 export interface PageLayout {
     Sections: PageSection[];
+    VerticalSpacing?: PageSizeType;
+    HorizontalSpacing?: PageSizeType;
     SectionsGap?: PageSizeType;
-    CoulmnsGap?: PageSizeType;
+    ColumnsGap?: PageSizeType;
+    // RoundedCorners?: PageSizeType;
     MaxWidth?: number;
 }
 
