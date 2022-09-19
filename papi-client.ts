@@ -31,6 +31,7 @@ import {
     Page,
     DataView,
     AddonData,
+    AuditLog,
 } from './entities';
 
 import { papi_fetch, getPerformance } from './papi-module';
@@ -107,6 +108,29 @@ export class PapiClient {
             .then((res) => (res ? JSON.parse(res) : ''));
     }
 
+    async asyncPost(url: string, body: any = undefined, headers: any = undefined): Promise<any> {
+        const asyncURL = this.getAsyncRelativeURL(url);
+
+        try {
+            const postResults = await this.post(asyncURL, body, headers);
+
+            if (!postResults.URI) {
+                throw new Error(`Async post to ${asyncURL} returned without URI: ${JSON.stringify(postResults)}`);
+            } else {
+                const pollingResults: AuditLog = await this.getAuditLogResultObject(postResults.URI);
+
+                if (!pollingResults.AuditInfo?.ResultObject) {
+                    throw new Error(`AuditLog ${postResults.URI} has no ResultObject.`);
+                }
+
+                return JSON.parse(pollingResults.AuditInfo.ResultObject);
+            }
+        } catch (ex) {
+            console.error(`asyncPost: ${ex}`);
+            throw new Error((ex as { message: string }).message);
+        }
+    }
+
     async delete(url: string): Promise<any> {
         return this.apiCall('DELETE', url);
     }
@@ -157,5 +181,88 @@ export class PapiClient {
         }
 
         return res;
+    }
+
+    msSleep(ms: number) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    }
+
+    sleep(ms: number) {
+        console.debug(`%cSleep: ${ms} milliseconds`);
+        this.msSleep(ms);
+        return;
+    }
+
+    async getAuditLogResultObject(uri: string, loopsAmount = 30): Promise<AuditLog> {
+        let auditLogResponse;
+
+        do {
+            try {
+                auditLogResponse = await this.get(uri);
+            } catch (ex) {
+                console.error(`getAuditLogResultObject: ${ex}`);
+                throw new Error((ex as { message: string }).message);
+            }
+
+            auditLogResponse =
+                auditLogResponse === null
+                    ? auditLogResponse
+                    : auditLogResponse[0] === undefined
+                    ? auditLogResponse
+                    : auditLogResponse[0];
+
+            //This case is used when AuditLog was not created at all (This can happen and it is valid)
+            if (auditLogResponse === null) {
+                this.sleep(2000);
+                console.log('%cAudit Log was not found, waiting...');
+                loopsAmount--;
+            }
+
+            //This case will only retry the get call again as many times as the "loopsAmount"
+            else if (auditLogResponse.Status.ID == '2' || auditLogResponse.Status.ID == '5') {
+                this.sleep(2000);
+                console.log(
+                    `%c${auditLogResponse.Status.ID === 2 ? 'In_Progress' : 'Started'}: Status ID is ${
+                        auditLogResponse.Status.ID
+                    }, 
+                    Retry ${loopsAmount} Times.`,
+                );
+                loopsAmount--;
+            }
+
+            // Action failed. Throwing error
+            else if (auditLogResponse.Status.ID === 0) {
+                const errorMessage = auditLogResponse['AuditInfo'].ErrorMessage;
+                console.log('Execution failed:', errorMessage);
+                throw new Error(errorMessage);
+            }
+        } while (
+            (auditLogResponse === null || auditLogResponse.Status.ID == '2' || auditLogResponse.Status.ID == '5') &&
+            loopsAmount > 0
+        );
+
+        return auditLogResponse;
+    }
+
+    // this will work only for unrouted addon function calls
+    getAsyncRelativeURL(url: string): string {
+        // async relative URL is in the format of: /addons/api/async/{{addonUUID}}/...
+        // regular relativeURL is in the format of: /addons/api/{{addonUUID}}/...
+
+        const splitURL = url.split('/');
+
+        if (splitURL.length < 4) {
+            throw new Error(`Relative URL: ${url} is invalid!`);
+        }
+
+        if (splitURL[3] === 'async') {
+            // URL is already async
+            return url;
+        }
+
+        // add 'async' to URL
+        splitURL.splice(3, 0, 'async');
+
+        return splitURL.join('/');
     }
 }
